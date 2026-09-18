@@ -495,6 +495,7 @@ class CosyVoice3Model(
         self.config = vllm_config.model_config.hf_config
         self.have_multimodal_outputs = True
         self.model_stage = vllm_config.model_config.model_stage
+        self._max_num_seqs = max(1, int(getattr(vllm_config.scheduler_config, "max_num_seqs", 8)))
         model_dir = vllm_config.model_config.model
         if not os.path.isdir(model_dir):
             model_dir = hf_api().snapshot_download(model_dir)
@@ -991,10 +992,12 @@ class CosyVoice3Model(
                 build_flow_estimator_trt,
             )
 
+            dynamic_batch = cosyvoice3_batch_flow_enabled() and self._max_num_seqs > 1
             wrapper = build_flow_estimator_trt(
                 onnx_path,
                 device="cuda",
-                dynamic_batch=cosyvoice3_batch_flow_enabled(),
+                dynamic_batch=dynamic_batch,
+                max_request_batch=self._max_num_seqs,
             )
             # ``estimator`` is a registered nn.Module submodule; delete it first
             # (frees the torch estimator weights) so the TRT wrapper can be set
