@@ -168,6 +168,9 @@ class ConditionalCFM(BASECFM):
             caller_stream = torch.cuda.current_stream(x.device)
             stream.wait_stream(caller_stream)
             with torch.cuda.stream(stream):
+                prepare_context = getattr(self.estimator, "prepare_context", None)
+                if prepare_context is not None:
+                    prepare_context(estimator, stream, int(x.shape[0]))
                 x_e = x.to(io_dtype).contiguous()
                 mask_e = mask.to(io_dtype).contiguous()
                 mu_e = mu.to(io_dtype).contiguous()

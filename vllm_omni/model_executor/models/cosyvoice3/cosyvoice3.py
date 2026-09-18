@@ -991,7 +991,11 @@ class CosyVoice3Model(
                 build_flow_estimator_trt,
             )
 
-            wrapper = build_flow_estimator_trt(onnx_path, device="cuda")
+            wrapper = build_flow_estimator_trt(
+                onnx_path,
+                device="cuda",
+                dynamic_batch=cosyvoice3_batch_flow_enabled(),
+            )
             # ``estimator`` is a registered nn.Module submodule; delete it first
             # (frees the torch estimator weights) so the TRT wrapper can be set
             # as a plain attribute — nn.Module.__setattr__ rejects non-Modules.
