@@ -10,9 +10,10 @@ flow.decoder.estimator*.onnx and wraps it so it can be dropped in for the torch
 estimator.
 
 The released estimator ONNX has CFG batch 2 at its interface. Cross-request
-flow batching needs CFG batch 2N. When requested, the builder makes the parsed
-network inputs batch-dynamic and creates two optimization profiles: a dedicated
-CFG=2 profile for the legacy path and a CFG=4..2N profile for batched flow.
+flow batching needs CFG batch 2N. When requested, the builder rewrites the
+exported batch metadata in memory and creates two optimization profiles: a
+dedicated CFG=2 profile for the legacy path and a CFG=4..2N profile for
+batched flow.
 The normal non-batched path retains the original static engine and cache key.
 
 Precision: TensorRT >= 11 dropped the weakly-typed FP16/INT8 builder flags, so
