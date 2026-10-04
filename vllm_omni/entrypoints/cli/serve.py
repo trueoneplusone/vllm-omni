@@ -25,6 +25,7 @@ from vllm.entrypoints.launchers.cli_args import make_arg_parser, validate_parsed
 from vllm.entrypoints.serve.utils.api_utils import VLLM_SUBCMD_PARSER_EPILOG
 from vllm.logger import init_logger
 
+from vllm_omni.diffusion.registry import resolve_native_single_file
 from vllm_omni.entrypoints.cli.logo import log_logo
 from vllm_omni.entrypoints.openai.api_server import (
     omni_run_server,
@@ -148,7 +149,8 @@ class OmniServeCommand(CLISubcommand):
             args.model_config = model_config
             explicit_keys = getattr(args, "explicit_keys", None)
             if explicit_keys is not None:
-                args.explicit_keys = explicit_keys | {"model_config"}
+                # --no-guardrails is a CLI-only alias, not a diffusion engine arg.
+                args.explicit_keys = (explicit_keys - {"no_guardrails"}) | {"model_config"}
 
         if args.headless:
             run_headless(args)
@@ -305,7 +307,8 @@ class OmniServeCommand(CLISubcommand):
         from vllm_omni.diffusion.utils.hf_utils import is_diffusion_model
 
         model = getattr(args, "model_tag", None) or getattr(args, "model", None)
-        if model and is_diffusion_model(model):
+        native_single_file = resolve_native_single_file(getattr(args, "model_class_name", None))
+        if model and ((native_single_file is not None and os.path.isfile(model)) or is_diffusion_model(model)):
             if api_server_count is not None and api_server_count > 1:
                 raise ValueError("--api-server-count > 1 is not supported for diffusion models")
             logger.info("Detected diffusion model: %s", model)
@@ -558,6 +561,15 @@ class OmniServeCommand(CLISubcommand):
             ),
         )
         omni_config_group.add_argument(
+            "--hsdp-weight-load-strategy",
+            choices=["full", "pre_sharded"],
+            default=None,
+            help=(
+                "HSDP checkpoint loading strategy: 'full' loads then shards; "
+                "'pre_sharded' shards meta parameters first and reads rank-local HF safetensors slices."
+            ),
+        )
+        omni_config_group.add_argument(
             "--lora-path",
             type=str,
             nargs="+",
@@ -634,6 +646,16 @@ class OmniServeCommand(CLISubcommand):
                 "Useful for model-specific sampling parameters not covered by the vLLM-Omni interface."
                 "During request time, it is overridden by corresponding parameters in the vLLM-Omni interface."
                 '(e.g. \'{"num_inference_steps": 30, "guidance_scale": 7.5}\').'
+            ),
+        )
+        omni_config_group.add_argument(
+            "--custom-pipeline-args",
+            dest="custom_pipeline_args",
+            type=json.loads,
+            default=None,
+            help=(
+                "JSON object passed to native/custom diffusion pipelines. "
+                'Only args containing "pipeline_class" trigger custom pipeline re-initialization.'
             ),
         )
         omni_config_group.add_argument(
@@ -778,7 +800,10 @@ class OmniServeCommand(CLISubcommand):
             type=_json_object,
             default=None,
             help=(
-                "JSON object configuring video output preparation, for example '{\"enable_device_postprocess\": true}'."
+                "JSON object configuring video output transport: enable_device_postprocess enables GPU preparation; "
+                "enable_registered_shm enables experimental CUDA-registered SHM for supported video outputs. "
+                "enable_borrowed_frames enables borrowed RGB frames in MP4 response encoding. "
+                "All default to false."
             ),
         )
         omni_config_group.add_argument(
@@ -810,6 +835,17 @@ class OmniServeCommand(CLISubcommand):
             "--vae-use-tiling",
             action="store_true",
             help="Enable VAE tiling for memory optimization (useful for mitigating OOM issues).",
+        )
+        omni_config_group.add_argument(
+            "--vae-fast-path",
+            choices=("off", "lossless", "channels_last"),
+            default="lossless",
+            help=(
+                "Wan VAE decoder fast path. 'lossless' (default) installs bit-exact fused kernels; "
+                "'channels_last' additionally switches decoder convolutions to channels-last memory "
+                "format and fuses RMSNorm+SiLU (faster, not bit-exact); 'off' keeps the reference "
+                "diffusers implementation."
+            ),
         )
 
         # Parallel weight loading (faster diffusion startup)
